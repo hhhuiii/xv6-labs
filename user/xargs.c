@@ -14,10 +14,11 @@ void run(char *program, char **args) {
 }
 
 int main(int argc, char **argv) {
-    char buf[2048];
-    char *p = buf, *last_p = buf;
-    char *argsbuf[128];
-    char **args = argsbuf;
+    char buf[2048];//存储从标准输入读取的数据
+    char *p = buf, //寻找参数分隔符
+    *last_p = buf;//记录当前参数的起始位置
+    char *argsbuf[128];//存储所有参数的字符串数组
+    char **args = argsbuf;//用于填充argsbuf的指针
 
     //首先将xargs的参数复制到argsbuf中
     for(int i = 1; i < argc; i++) {
@@ -35,7 +36,7 @@ int main(int argc, char **argv) {
             last_p = p + 1;
             //遇到换行符时，表示一组参数读取完毕，调用run函数执行程序，传递参数
             if(*p == '\n') {
-                *pa = 0;
+                *pa = 0;//exec要求参数列表以NULL结尾
                 run(argv[1], argsbuf);
                 pa = args;
             }
