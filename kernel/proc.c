@@ -127,6 +127,8 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  p->kama_syscall_trace = 0;  // 创建新进程时，kama_syscall_trace 设置为默认值0
+
   return p;
 }
 
@@ -296,6 +298,8 @@ fork(void)
   np->state = RUNNABLE;
 
   release(&np->lock);
+
+  np->kama_syscall_trace = p->kama_syscall_trace; // 子进程能继承父进程的syscall_trace
 
   return pid;
 }
@@ -691,5 +695,15 @@ procdump(void)
       state = "???";
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
+  }
+}
+
+void
+procnum(uint64 *dst) {
+  *dst = 0;
+  struct proc *p;
+  for(p = proc; p < &proc[NPROC]; p++) {
+    if(p->state != UNUSED)
+      *dst += 1;  // 如果要用自增运算符，请注意自增运算符比解引用运算符优先级更高
   }
 }
