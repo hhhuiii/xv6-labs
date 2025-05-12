@@ -285,7 +285,7 @@ growproc(int n)
   } else if(n < 0){
     // 内核页表中的映射同步缩小
     uvmdealloc(p->pagetable, sz, sz + n);
-    sz = uvmdealloc(p->pagetable, sz, sz + n);
+    sz = kvmdealloc(p->pagetable, sz, sz + n);
   }
   p->sz = sz;
   return 0;

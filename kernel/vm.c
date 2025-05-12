@@ -15,14 +15,15 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+int copyin_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len);
+int copyinstr_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max);
+
 /*
  * create a direct-map page table for the kernel.
  */
 void
 kvm_map_pagetable(pagetable_t pgtbl)  //将所有内核需要的直接映射的设备、中断控制等添加到页表pgtbl中
 {
-
-
   // uart registers
   kvmmap(pgtbl, UART0, UART0, PGSIZE, PTE_R | PTE_W);
 
@@ -49,10 +50,10 @@ kvm_map_pagetable(pagetable_t pgtbl)  //将所有内核需要的直接映射的�
 pagetable_t
 kvminit_newpgtbl()
 {
-  pagetable_t pgtbl = (pagetable_t) kalloc();
+  pagetable_t pgtbl = (pagetable_t) kalloc();  // 分配一页物理内存，操作系统使用空闲页链表管理空闲物理内存
   memset(pgtbl, 0, PGSIZE);
 
-  kvm_map_pagetable(pgtbl);
+  kvm_map_pagetable(pgtbl);  // 添加必要的映射
 
   return pgtbl;
 }
@@ -60,7 +61,7 @@ kvminit_newpgtbl()
 void
 kvminit()
 {
-  kernel_pagetable = kvminit_newpgtbl();  //全局内核页表还是使用kvminit函数初始化
+  kernel_pagetable = kvminit_newpgtbl();  //全局内核页表还是使用kvminit函数初始化，全局的内核页表用于内核启动以及无进程在运行时使用
   // 全局内核页表加上CLIENT的映射，其他的每个进程独享的内核页表还是不需要此映射
   kvmmap(kernel_pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
 }
@@ -70,8 +71,8 @@ kvminit()
 void
 kvminithart()
 {
-  w_satp(MAKE_SATP(kernel_pagetable));
-  sfence_vma();
+  w_satp(MAKE_SATP(kernel_pagetable));  // 设置satp寄存器
+  sfence_vma();  // 刷新TLB
 }
 
 // Return the address of the PTE in page table pagetable
@@ -89,7 +90,7 @@ kvminithart()
 pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
-  if(va >= MAXVA)
+  if(va >= MAXVA)  // 虚拟地址超限
     panic("walk");
 
   for(int level = 2; level > 0; level--) {
@@ -125,7 +126,7 @@ walkaddr(pagetable_t pagetable, uint64 va)
     return 0;
   if((*pte & PTE_U) == 0)
     return 0;
-  pa = PTE2PA(*pte);
+  pa = PTE2PA(*pte);  // 页表项有效且为用户页表项
   return pa;
 }
 
@@ -174,7 +175,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   for(;;){
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
-    if(*pte & PTE_V)
+    if(*pte & PTE_V)  // 已经存在有效映射
       panic("remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
     if(a == last)

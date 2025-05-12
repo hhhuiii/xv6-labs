@@ -184,6 +184,7 @@ void            kvm_free_kernelpgtbl(pagetable_t); //释放内核页表但不释
 pagetable_t     kvminit_newpgtbl(void); //创建一个新的页表并初始化映射
 void            kvm_free_kernelpgtbl(pagetable_t); //释放内核页表但不释放指向的物理页
 int             kvmcopymappings(pagetable_t, pagetable_t, uint64, uint64);
+uint64          kvmdealloc(pagetable_t, uint64, uint64);
 
 int             copyin_new(pagetable_t, char *, uint64, uint64);
 int             copyinstr_new(pagetable_t, char *, uint64, uint64);
