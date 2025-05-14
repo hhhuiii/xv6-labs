@@ -132,3 +132,16 @@ printfinit(void)
   initlock(&pr.lock, "pr");
   pr.locking = 1;
 }
+
+// 遍历栈帧指针打印函数地址
+void
+backtrace()
+{
+  uint64 fp = r_fp();  // 首先获取栈帧起始地址（栈帧的较高地址边界）
+  printf("backtrace:\n");
+  while(PGROUNDDOWN(fp) != PGROUNDUP(fp)) {  // 当前栈帧还在一页的有效范围内，理解这一等式需要注意随着循环进行fp是向低地址减小的
+    uint64 ra = *(uint64*)(fp - 8);  // return address
+    printf("%p\n", ra);
+    fp = *(uint64*)(fp - 16);  // 类型转换后解引用
+  }
+}
