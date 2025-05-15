@@ -229,7 +229,7 @@ devintr()
 
 //设置进程中时钟相关属性
 int
-sigalarm(int ticks, void(*handler)())
+sigalarm(int ticks, void(*handler)(void))
 {
   struct proc* p = myproc();
   p->alarm_interval = ticks;
