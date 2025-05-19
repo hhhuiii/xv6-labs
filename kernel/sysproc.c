@@ -47,8 +47,19 @@ sys_sbrk(void)
   if(argint(0, &n) < 0)
     return -1;
   addr = myproc()->sz;
-  if(growproc(n) < 0)
+  // if(growproc(n) < 0)
+  //   return -1;
+  struct proc *p = myproc();
+  if(n > 0) {//惰性分配，只是改变sz值
+    p->sz += n;
+  }
+  else if(p->sz + n > 0) {//但若是要缩减内存，立即执行，且检查缩减后占用内存是否为正值
+    if(growproc(n) < 0)
+      return -1;
+  }
+  else
     return -1;
+  
   return addr;
 }
 

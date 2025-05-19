@@ -67,11 +67,21 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
-    printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
-    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
-    p->killed = 1;
-  }
+  } 
+  
+  // 惰性分配导致的缺页异常处理
+  else {
+    uint64 va = r_stval();//获取引发缺页异常的虚拟地址
+    //判断fault_va是否在进程栈空间中
+    if((r_scause() == 13 || r_scause() == 15) && uvmshouldallocate(va)) {
+      uvmlazyallocate(va);
+    }
+    else {//非缺页异常，或在非惰性分配地址上发生缺页异常
+      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+      printf("          sepc=%p stval=%p\n", r_scause(), r_stval());
+      p->killed = 1;
+    }
+  }  
 
   if(p->killed)
     exit(-1);
