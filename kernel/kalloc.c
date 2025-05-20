@@ -9,6 +9,14 @@
 #include "riscv.h"
 #include "defs.h"
 
+#define PA2PGREF_ID(p) (((p)-KERNBASE)/PGSIZE)//由物理地址获取物理页id
+#define PGREF_MAX_ENTRIES PA2PGREF_ID(PHYSTOP)//物理页数上限
+
+int pageref[PGREF_MAX_ENTRIES];//每个物理页的引用数
+struct spinlock pgreflock;//用于pageref数组的锁
+
+#define PA2PGREF(p) pageref[PA2PGREF_ID((uint64)(p))]//获取地址对应物理页引用数
+
 void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
@@ -27,6 +35,7 @@ void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  initlock(&pgreflock, "pgref");//物理页id数组锁
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -52,14 +61,19 @@ kfree(void *pa)
     panic("kfree");
 
   // Fill with junk to catch dangling refs.
-  memset(pa, 1, PGSIZE);
+  acquire(&pgreflock);
+  if(--PA2PGREF(pa) <= 0) {//只有当引用计数小于0时释放页
+    memset(pa, 1, PGSIZE);
 
-  r = (struct run*)pa;
+    r = (struct run*)pa;
 
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+    acquire(&kmem.lock);
+    r->next = kmem.freelist;
+    kmem.freelist = r;
+    release(&kmem.lock);
+  }
+  release(&pgreflock);
+  
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -78,5 +92,42 @@ kalloc(void)
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
+    PA2PGREF(r) = 1;//将新分配的物理页的引用数设置为1（刚分配的页还没映射，不会有进程使用，这一过程不用加锁）
   return (void*)r;
+}
+
+//累加物理页引用计数
+void
+krefpage(void *pa)
+{
+  acquire(&pgreflock);
+  PA2PGREF(pa)++;
+  release(&pgreflock);
+}
+
+//写时复制一个新的物理地址返回
+//若该物理页的引用数>1，将引用数-1，并分配一个新的物理页返回
+//若引用数<=1，无需操作直接返回物理页
+void*
+kcopy_n_deref(void *pa)
+{
+  acquire(&pgreflock);
+
+  if(PA2PGREF(pa) <= 1) {
+    release(&pgreflock);
+    return pa;
+  }
+  //分配新物理页
+  uint64 newpa = (uint64)kalloc();
+  if(newpa == 0) {//内存不够
+    release(&pgreflock);
+    return 0;
+  }
+  memmove((void *)newpa, (void *)pa, PGSIZE);
+
+  PA2PGREF(pa)--;
+
+  release(&pgreflock);
+  return (void *)newpa;
+  
 }
