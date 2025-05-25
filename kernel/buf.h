@@ -9,6 +9,6 @@ struct buf {
   struct buf *next;
   uchar data[BSIZE];
 
-  uint lastuse;//跟踪LRU-buf
+  uint lastuse;//最后使用的时间戳
 };
 
