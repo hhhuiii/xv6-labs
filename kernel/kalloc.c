@@ -21,12 +21,25 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
-} kmem;
+} kmem[NCPU];//为每个CPU分配独立的freelist，多个CPU并发分配物理内存不会互相竞争
+
+char * kmem_lock_names[] = {
+  "kmem_cpu_0",
+  "kmem_cpu_1",
+  "kmem_cpu_2",
+  "kmem_cpu_3",
+  "kmem_cpu_4",
+  "kmem_cpu_5",
+  "kmem_cpu_6",
+  "kmem_cpu_7",
+};
 
 void
 kinit()
 {
-  initlock(&kmem.lock, "kmem");
+  for(int i = 0; i < NCPU; i++) {
+    initlock(&kmem[i].lock, kmem_lock_names[i]);
+  }
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -55,11 +68,14 @@ kfree(void *pa)
   memset(pa, 1, PGSIZE);
 
   r = (struct run*)pa;
+  push_off();//要获取CPU编号，中断关闭时调用cpuid才是安全的，因此需要关中断
+  int cpu = cpuid();
 
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+  acquire(&kmem[cpu].lock);
+  r->next = kmem[cpu].freelist;//将释放的页插入当前CPU的freelist中
+  kmem[cpu].freelist = r;
+  release(&kmem[cpu].lock);
+  pop_off();//开中断
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -70,11 +86,40 @@ kalloc(void)
 {
   struct run *r;
 
-  acquire(&kmem.lock);
-  r = kmem.freelist;
+  push_off();//关中断
+  int cpu = cpuid();
+
+  acquire(&kmem[cpu].lock);
+
+  if(!kmem[cpu].freelist) {//当前CPU已经没有freelist时，去其他CPU偷页
+    int steal_left = 64;//剩余待偷页面数
+    for(int i = 0; i < NCPU; i++) {
+      if(i == cpu) {//跳过当前CPU
+        continue;
+      }
+      acquire(&kmem[i].lock);//对于其他待选CPU的freelist，先加锁，发现它也没有空闲物理页就释放锁
+      if(!kmem[i].freelist) {
+        release(&kmem[i].lock);
+        continue;
+      }
+
+      struct run *rr = kmem[i].freelist;
+      while(rr && steal_left) {//循环将kmem[i]的freelist中项移动到kmem[cpu]的freelist中
+        kmem[i].freelist = rr->next;
+        rr->next = kmem[cpu].freelist;
+        kmem[cpu].freelist = rr;
+        rr = kmem[i].freelist;
+        steal_left--;
+      }
+      release(&kmem[i].lock);
+      if(steal_left == 0)//偷到指定页数后退出循环
+        break;
+    }
+  }
+  r = kmem[cpu].freelist;
   if(r)
-    kmem.freelist = r->next;
-  release(&kmem.lock);
+    kmem[cpu].freelist = r->next;
+  release(&kmem[cpu].lock);
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
