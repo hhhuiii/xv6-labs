@@ -265,8 +265,8 @@ iget(uint dev, uint inum)
   ip = empty;
   ip->dev = dev;
   ip->inum = inum;
-  ip->ref = 1;
-  ip->valid = 0;
+  ip->ref = 1;//返回前引用计数置1，表示将被使用
+  ip->valid = 0;//还未从磁盘读取到内存
   release(&icache.lock);
 
   return ip;
@@ -379,28 +379,53 @@ bmap(struct inode *ip, uint bn)
 {
   uint addr, *a;
   struct buf *bp;
-
+  //若bn小于直接块数量，按直接映射处理
   if(bn < NDIRECT){
-    if((addr = ip->addrs[bn]) == 0)
+    if((addr = ip->addrs[bn]) == 0)//若对应的物理块号为0，表示还没分配，分配一个新的物理块，建立映射
       ip->addrs[bn] = addr = balloc(ip->dev);
     return addr;
   }
+  //处理间接块，减去直接块的数量得到间接块的逻辑块号
   bn -= NDIRECT;
 
   if(bn < NINDIRECT){
     // Load indirect block, allocating if necessary.
     if((addr = ip->addrs[NDIRECT]) == 0)
-      ip->addrs[NDIRECT] = addr = balloc(ip->dev);
+      ip->addrs[NDIRECT] = addr = balloc(ip->dev);//此时这个块可以映射256个块
+    //获取刚分配的缓存块，检查bn对应的块，若为0则没有分配，建立映射
     bp = bread(ip->dev, addr);
     a = (uint*)bp->data;
     if((addr = a[bn]) == 0){
       a[bn] = addr = balloc(ip->dev);
       log_write(bp);
     }
+    brelse(bp);//建立映射结束，释放缓存块（可以通过ip->dev和bn找到这个块）
+    return addr;
+  }
+  //二级间接块，减去一级间接块的数量得到二级间接块的逻辑块号
+  bn -= NINDIRECT;
+  if(bn < NINDIRECT * NINDIRECT) {
+    if((addr = ip->addrs[NDIRECT + 1]) == 0)
+      ip->addrs[NDIRECT + 1] = addr = balloc(ip->dev);
+    bp = bread(ip->dev, addr);
+    a = (uint *)bp->data;
+    if((addr = a[bn / NINDIRECT]) == 0) {
+      a[bn / NINDIRECT] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);
+
+    //最后一级索引
+    bn %= NINDIRECT;
+    bp = bread(ip->dev, addr);
+    a = (uint *)bp->data;
+    if((addr = a[bn]) == 0) {
+      a[bn] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
     brelse(bp);
     return addr;
   }
-
   panic("bmap: out of range");
 }
 
@@ -412,14 +437,14 @@ itrunc(struct inode *ip)
   int i, j;
   struct buf *bp;
   uint *a;
-
+  //释放直接块的映射
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
       bfree(ip->dev, ip->addrs[i]);
       ip->addrs[i] = 0;
     }
   }
-
+  //释放一级间接块的映射
   if(ip->addrs[NDIRECT]){
     bp = bread(ip->dev, ip->addrs[NDIRECT]);
     a = (uint*)bp->data;
@@ -430,6 +455,27 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+
+  //释放二级间接块的映射
+  if(ip->addrs[NDIRECT + 1]) {
+    bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
+    a = (uint *)bp->data;
+    for(int i = 0; i < NINDIRECT; i++) {
+      if(a[i]) {
+        struct buf *bp2 = bread(ip->dev, a[i]);
+        uint *a2 = (uint *)bp2->data;
+        for(int j = 0; j < NINDIRECT; j++) {
+          if(a2[j])
+            bfree(ip->dev, a2[j]);
+        }
+        brelse(bp2);
+        bfree(ip->dev, a[i]);
+      }
+    }
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT + 1]);
+    ip->addrs[NDIRECT + 1] = 0;
   }
 
   ip->size = 0;
