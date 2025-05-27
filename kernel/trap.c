@@ -14,6 +14,7 @@ extern char trampoline[], uservec[], userret[];
 // in kernelvec.S, calls kerneltrap().
 void kernelvec();
 
+extern int vmaalloc(uint);
 extern int devintr();
 
 void
@@ -67,7 +68,15 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  }
+  else if(r_scause() == 13 || r_scause() == 15) {
+    uint64 va = r_stval();
+    if(vmaalloc(va) == 0) {
+      printf("usertrap(): wrong va");
+      p->killed = 1;//杀死该进程
+    }
+  } 
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
